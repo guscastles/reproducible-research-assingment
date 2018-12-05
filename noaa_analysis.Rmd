@@ -1,0 +1,82 @@
+---
+title: Health and Economic Impact of Severe Weather Events Across the USA - Exploring
+  the NOAA Storm Database
+output:
+  html_document:
+    df_print: paged
+---
+
+## Synopsis
+
+This project is intented to target the exploration of the NOAA Storm Database to understand the impact on public health and overall economics of severe weather events, like tornados, drought, snow, rainfalls, in several categories. Two basic questions are adressed by this report:
+
+1. Across the United States, which types of events are most harmful with respect to population health?
+2. Across the United States, which types of events have the greatest economic consequences?
+
+This repost will try to answer these questions showing relevant data and their graphical interpretion. Working software code will be available as well, to help with its reproducibility.
+
+## Data Processing
+
+The data for this project is available from this link
+```{r echo=TRUE, message=FALSE, cache=TRUE, comment=FALSE, results=FALSE}
+library(lubridate)
+dest_file <- "StormData.csv.bz2"
+if (!file.exists(dest_file)) {
+        url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+        download.file(url, destfile = dest_file)
+        download_timestamp <- timestamp()
+        write(download_timestamp, file = "download_timestamp.txt")
+}
+download_timestamp <- read.delim("download_timestamp.txt", header = FALSE)
+```
+
+File `r dest_file` was downloaded on `r unlist(download_timestamp)`.
+
+```{r cache=TRUE}
+dataset <- read.csv(dest_file)
+```
+
+A sample from the original dataset is shown below
+```{r}
+head(dataset)
+```
+
+The dataset has `r dim(dataset)[1]` records. 
+
+### Types of Events Most Harmful to Population Health
+
+The relevant fields to answer this first question are
+> EVTYPE -> event type
+> FATALITIES
+> INJURIES
+
+A fourth field, Casualties, with the sum of FATALITIES and INJURIES, will be created, to give a broad view of the
+health hazard presented by each event type. Also, a threshold of 95% of the distribution of occurrences will be used to identify the most impacting weather events, that means, we are going to see the 5% most impacting events for human health, in terms of number of fatalities and injuries.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+health_impact_set <- dataset %>%
+                select(EVTYPE, FATALITIES, INJURIES) %>%
+                mutate(Casualties = FATALITIES + INJURIES, EventType = EVTYPE)
+agg <- aggregate(Casualties ~ EventType, data = health_impact_set, FUN = sum)
+agg_sorted <- agg[order(-agg$Casualties),]
+threshold <- quantile(agg[agg$Casualties > 0, "Casualties"], probs = 0.95)
+most_impacting_events <- agg_sorted[agg_sorted$Casualties > threshold,] %>%
+        select(EventType, Casualties) %>%
+        mutate(EventType = tolower(EventType))
+most_impacting_events[most_impacting_events$EventType == "tstm wind", "EventType"] = "marine thunderstorm wind"
+g <- most_impacting_events %>% ggplot(aes(x = reorder(EventType, Casualties), Casualties))
+g + geom_bar(stat = "identity", aes(color = EventType, fill = EventType)) +
+        theme(legend.position = "none") +
+        ggtitle("Number of Casualties per Event Type") +
+        ylab("Casualties") +
+        xlab("Event Type") +
+        scale_y_continuous(limits = c(0, 100000)) +
+        coord_flip()
+```
+
+```{r}
+most_impacting_events[most_impacting_events$EventType == "tstm wind", "EventType"] = "marine thunderstorm wind"
+most_impacting_events
+```

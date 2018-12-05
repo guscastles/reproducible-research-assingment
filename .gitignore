@@ -1,0 +1,7 @@
+.RData
+.Rhistory
+*.bz2
+*.html
+*_cache/
+*_files/
+project*
