@@ -61,10 +61,10 @@ library(ggplot2)
 ```{r echo=TRUE}
 health_impact_set <- dataset %>%
                 select(EVTYPE, FATALITIES, INJURIES) %>%
-                mutate(Casualties = FATALITIES + INJURIES, EventType = tolower(EVTYPE))
+                mutate(Casualties = (FATALITIES + INJURIES) / 1e3, EventType = tolower(EVTYPE))
 agg <- aggregate(Casualties ~ EventType, data = health_impact_set, FUN = sum)
 agg_sorted <- agg[order(-agg$Casualties),]
-threshold <- quantile(agg[agg$Casualties > 1, "Casualties"], probs = 0.95)
+threshold <- quantile(agg[agg$Casualties > 0, "Casualties"], probs = 0.95)
 most_impacting_events <- agg_sorted[agg_sorted$Casualties > threshold,]
 most_impacting_events[most_impacting_events$EventType == "tstm wind", "EventType"] = "marine thunderstorm wind"
 ```
@@ -123,11 +123,13 @@ g <- most_impacting_events %>% ggplot(aes(x = reorder(EventType, Casualties), Ca
 g + geom_bar(stat = "identity", aes(color = EventType, fill = EventType)) +
         theme(legend.position = "none") +
         ggtitle("Number of Casualties per Event Type") +
-        ylab("Casualties") +
+        ylab("Casualties (in thousands)") +
         xlab("Event Type") +
-        scale_y_continuous(limits = c(0, 103000)) +
+        scale_y_continuous(limits = c(0, 100)) +
         coord_flip() +
-        geom_text(aes(y = Casualties + 1000, label = format(Casualties, big.mark = ",", scientific = FALSE), hjust = "left"), colour = "darkgrey")
+        geom_text(aes(y = Casualties + 1,
+                      label = format(Casualties, digits = 2, nsmall = 1, big.mark = ",", scientific = FALSE),
+                      hjust = "left"), colour = "darkgrey")
 ```
 
 ### Economic Impact
@@ -139,10 +141,10 @@ g + geom_bar(stat = "identity", aes(color = EventType, fill = EventType)) +
         ggtitle("Economic Cost per Event Type") +
         ylab("Cost (in US$ billions)") +
         xlab("Event Type") +
-        scale_y_continuous(limits = c(0, 160)) +
+        scale_y_continuous(limits = c(0, 157)) +
         coord_flip() +
         geom_text(aes(y = EconomicCost + 1,
-                      label = format(EconomicCost, digits = 3, nsmal = 2, big.mark = ",", scientific = FALSE),
+                      label = format(EconomicCost, digits = 3, nsmal = 1, big.mark = ",", scientific = FALSE),
                       hjust = "left"), colour = "darkgrey")
 
 ```
