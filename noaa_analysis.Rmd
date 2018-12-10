@@ -37,7 +37,7 @@ dataset <- read.csv(dest_file)
 ```
 
 A sample from the original dataset is shown below
-```{r}
+```{r echo=TRUE}
 head(dataset)
 ```
 
@@ -53,30 +53,96 @@ The relevant fields to answer this first question are
 A fourth field, Casualties, with the sum of FATALITIES and INJURIES, will be created, to give a broad view of the
 health hazard presented by each event type. Also, a threshold of 95% of the distribution of occurrences will be used to identify the most impacting weather events, that means, we are going to see the 5% most impacting events for human health, in terms of number of fatalities and injuries.
 
-```{r}
+```{r echo=TRUE, message=FALSE, comment=FALSE, results=FALSE}
 library(dplyr)
 library(ggplot2)
+```
+
+```{r echo=TRUE}
 health_impact_set <- dataset %>%
                 select(EVTYPE, FATALITIES, INJURIES) %>%
-                mutate(Casualties = FATALITIES + INJURIES, EventType = EVTYPE)
+                mutate(Casualties = FATALITIES + INJURIES, EventType = tolower(EVTYPE))
 agg <- aggregate(Casualties ~ EventType, data = health_impact_set, FUN = sum)
 agg_sorted <- agg[order(-agg$Casualties),]
-threshold <- quantile(agg[agg$Casualties > 0, "Casualties"], probs = 0.95)
-most_impacting_events <- agg_sorted[agg_sorted$Casualties > threshold,] %>%
-        select(EventType, Casualties) %>%
-        mutate(EventType = tolower(EventType))
+threshold <- quantile(agg[agg$Casualties > 1, "Casualties"], probs = 0.95)
+most_impacting_events <- agg_sorted[agg_sorted$Casualties > threshold,]
 most_impacting_events[most_impacting_events$EventType == "tstm wind", "EventType"] = "marine thunderstorm wind"
+```
+
+### Types of Events Most Harmful to the Economy
+
+The relevant fields to answer this first question are
+> EVTYPE -> event type
+> PROPDMG
+> PROPDMGEXP
+> CROPDMG
+> CROPDMGEXP
+
+A fourth field, Casualties, with the sum of FATALITIES and INJURIES, will be created, to give a broad view of the
+health hazard presented by each event type. Also, a threshold of 95% of the distribution of occurrences will be used to identify the most impacting weather events, that means, we are going to see the 5% most impacting events for human health, in terms of number of fatalities and injuries.
+
+```{r echo=TRUE}
+multiplier <- function(type) {
+        mul <- tolower(as.character(type))
+        switch(ifelse(mul == '', '1', mul), 'k' = 1e3,
+               'm' = 1e6,
+               'b' = 1e9,
+               'h' = 1e4,
+               '+' = 1,
+               '-' = 1,
+               as.numeric(type))
+}
+
+economic_impact_set <- dataset %>%
+                select(EVTYPE, PROPDMG, CROPDMG) %>%
+                mutate(EventType = EVTYPE,
+                       PropDmg = PROPDMG,
+                       CropDmg = CROPDMG) %>%
+                select(EventType, PropDmg, CropDmg)
+
+economic_impact_set$PropDmgMul <- dataset$PROPDMGEXP %>%
+        sapply(multiplier)
+economic_impact_set$CropDmgMul <- dataset$CROPDMGEXP %>%
+        sapply(multiplier)
+economic_impact_set <- economic_impact_set %>%
+        mutate(EconomicCost = (PropDmg * PropDmgMul + CropDmg * CropDmgMul) / 1e9)
+
+econ_agg <- aggregate(EconomicCost ~ EventType, data = economic_impact_set, FUN = sum)
+econ_agg_sorted <- econ_agg[order(-econ_agg$EconomicCost),]
+threshold <- quantile(econ_agg[econ_agg$EconomicCost > 1, "EconomicCost"], probs = 0.75)
+most_economic_impacting_events <- econ_agg_sorted[econ_agg_sorted$EconomicCost > threshold,] %>%
+        select(EventType, EconomicCost) %>%
+        mutate(EventType = tolower(EventType))
+```
+
+## Results
+
+### Human Health Impact
+```{r}
 g <- most_impacting_events %>% ggplot(aes(x = reorder(EventType, Casualties), Casualties))
 g + geom_bar(stat = "identity", aes(color = EventType, fill = EventType)) +
         theme(legend.position = "none") +
         ggtitle("Number of Casualties per Event Type") +
         ylab("Casualties") +
         xlab("Event Type") +
-        scale_y_continuous(limits = c(0, 100000)) +
-        coord_flip()
+        scale_y_continuous(limits = c(0, 103000)) +
+        coord_flip() +
+        geom_text(aes(y = Casualties + 1000, label = format(Casualties, big.mark = ",", scientific = FALSE), hjust = "left"), colour = "darkgrey")
 ```
 
+### Economic Impact
+
 ```{r}
-most_impacting_events[most_impacting_events$EventType == "tstm wind", "EventType"] = "marine thunderstorm wind"
-most_impacting_events
+g <- most_economic_impacting_events %>% ggplot(aes(x = reorder(EventType, EconomicCost), EconomicCost))
+g + geom_bar(stat = "identity", aes(color = EventType, fill = EventType)) +
+        theme(legend.position = "none") +
+        ggtitle("Economic Cost per Event Type") +
+        ylab("Cost (in US$ billions)") +
+        xlab("Event Type") +
+        scale_y_continuous(limits = c(0, 160)) +
+        coord_flip() +
+        geom_text(aes(y = EconomicCost + 1,
+                      label = format(EconomicCost, digits = 3, nsmal = 2, big.mark = ",", scientific = FALSE),
+                      hjust = "left"), colour = "darkgrey")
+
 ```
