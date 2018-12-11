@@ -1,4 +1,5 @@
 .RData
+rsconnect/
 .Rhistory
 *.bz2
 *.html
