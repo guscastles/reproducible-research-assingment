@@ -21,9 +21,13 @@ This repost will try to answer these questions showing relevant data and their g
 library(dplyr)
 library(ggplot2)
 library(lubridate)
+library(reshape2)
 ```
 
 The data for this project is available from this link
+
+> https://d396qusza40orc.cloudfront.net/repdata/data/StormData.csv.bz2
+
 ```{r echo=TRUE, message=FALSE, cache=TRUE, comment=FALSE, results=FALSE}
 dest_file <- "StormData.csv.bz2"
 if (!file.exists(dest_file)) {
@@ -48,30 +52,109 @@ A sample from the original dataset is shown below
 head(dataset)
 ```
 
-The dataset has `r dim(dataset)[1]` records. 
+The dataset has `r format(dim(dataset)[1], big.mark = ",")` records. 
+
+
+The first step is to normalize the event type fields with the 48 different types recognized by the NOAA
+
+```{r}
+event_types <- list(
+        c("thunderstorm wind", "thunderstorm|tstm"),
+        c("storm surge/tide", "(surge|high.+tide)"),
+        c("astronomical low tide", "astronomical|low +tide"),
+        c("avalanche", "avalanc"),
+        c("blizzard", "blizzard"),
+        c("coastal flood", "coastal"),
+        c("extreme cold/wind chill", "extreme.+chill"),
+        c("cold/wind chill", "chill"),
+        c("debris flow", "debris"),
+        c("freezing fog", "free.+fog"),
+        c("dense fog", "fog"),
+        c("dense smoke", "smoke"),
+        c("drought", "drought"),
+        c("dust devil", "devil"),
+        c("dust storm", "dust +storm"),
+        c("excessive heat", "exc.+heat"),
+        c("lakeshore flood ", "lakeshore"),
+        c("flash flood", "flash"),
+        c("flood", "flood"),
+        c("frost/freeze", "frost|freeze"),
+        c("funnel cloud", "funnel"),
+        c("marine hail", "marine.+hail"),
+        c("hail", "hail"),
+        c("heat", "heat"),
+        c("heavy rain", "rain"),
+        c("heavy snow", "snow"),
+        c("high surf", "surf"),
+        c("high wind", "high.+wind"),
+        c("hurricane (typhoon)", "hurricane|typhoon"),
+        c("ice storm", "ice.+storm"),
+        c("lake-effect snow", "lake"),
+        c("lightning", "lightning"),
+        c("marine high wind", "marine.+high"),
+        c("marine strong wind", "marine.+strong"),
+        c("marine thunderstorm wind", "marine +thunderstorm +wind"),
+        c("rip current", "rip|current"),
+        c("seiche", "seiche"),
+        c("sleet", "sleet"),
+        c("strong wind", "strong +wind"),
+        c("tornado", "tornado"),
+        c("tropical depression", "tropical.+depression"),
+        c("tropical storm", "tropical.+storm"),
+        c("tsunami", "tsunami"),
+        c("volcanic ash", "volcanic|ash"),
+        c("waterspout", "waterspout"),
+        c("wildfire", "wildfire"),
+        c("winter storm", "winter.+storm"),
+        c("winter weather", "winter.+weather")
+)
+```
+
+The second field of each element of the list above is a regular expression that will be used to identify the existing values in the dataset. Then, they will be changed to the official naming from the NOAA database
+
+```{r cache=TRUE, comment=FALSE, message=FALSE, results=FALSE}
+normalize_event_type <- function(data_set, event) {
+        data_set[grep(event[2], data_set$EVTYPE, ignore.case = TRUE), 'EVTYPE'] <- event[1]
+        data_set
+}
+
+dataset$EVTYPE <- as.character(unlist(dataset$EVTYPE))
+
+for (event in event_types) {
+        dataset <- normalize_event_type(dataset, event)
+}
+```
 
 ### Types of Events Most Harmful to Population Health
 
 The relevant fields to answer this first question are
  
 > EVTYPE &rarr; EventType (renamed)  
-> FATALITIES  
-> INJURIES  
+> FATALITIES &rarr; Fatalities (renamed)  
+> INJURIES &rarr; Injuries (renamed)    
 
-A fourth field, *Casualties*, with the sum of FATALITIES and INJURIES, will be created, to give a broad view of the
-health hazard presented by each event type. Also, the top ten event types will be used to identify the most impacting weather events.
+The initial data exploration will remove the records with non-relevant data (fatalities and injuries equal to zero) and will change the magnetude of both featues by dividing by 10<sup>3</sup>, so the presented data can be more readable.
 
-The calculation below prepares the data for the final results section
-
-```{r echo=TRUE, cache=TRUE, comment=FALSE, message=FALSE, results=FALSE}
+```{r echo=TRUE, comment=FALSE, message=FALSE, results=FALSE}
 health_impact_set <- dataset %>%
-                select(EVTYPE, FATALITIES, INJURIES) %>%
-                mutate(Casualties = (FATALITIES + INJURIES) / 1e3, EventType = tolower(EVTYPE))
-agg <- aggregate(Casualties ~ EventType, data = health_impact_set, FUN = sum)
-most_impacting_events <- agg %>%
-        arrange(desc(Casualties)) %>%
+        select(EVTYPE, FATALITIES, INJURIES) %>%
+        mutate(Fatalities = FATALITIES / 1e3,
+               Injuries = INJURIES / 1e3,
+               EventType = tolower(EVTYPE)) %>%
+        filter(Fatalities != 0 | Injuries != 0) %>%
+        select(EventType, Fatalities, Injuries)
+```
+
+Summing up the different events and extracting the top ten most impacting ones is the next step in the process
+
+```{r comment=FALSE, message=FALSE, results=FALSE}
+health_impacting_events <- aggregate(cbind(Fatalities, Injuries) ~ EventType, data = health_impact_set, sum)
+top_ten_health_impacting_events <- health_impacting_events %>%
+        mutate(Total = Fatalities + Injuries) %>%
         top_n(10)
-most_impacting_events[most_impacting_events$EventType == "tstm wind", "EventType"] = "marine thunderstorm wind"
+most_health_impacting_events <- top_ten_health_impacting_events %>%
+        select(EventType, Fatalities, Injuries) %>%
+        melt(id = "EventType", variable.name = "Casualties")
 ```
 
 ### Types of Events Most Harmful to the Economy
@@ -79,25 +162,19 @@ most_impacting_events[most_impacting_events$EventType == "tstm wind", "EventType
 The relevant fields to answer the second question are
   
 > EVTYPE &rarr; EventType (renamed)  
-> PROPDMG  
-> PROPDMGEXP  
-> CROPDMG  
-> CROPDMGEXP  
+> PROPDMG &rarr; PropDmg (renamed, property damage)  
+> PROPDMGEXP &rarr; (property damage exponent)    
+> CROPDMG &rarr; CropDmg (renamed, crop damage)  
+> CROPDMGEXP &rarr; (crop damage exponent)  
 
-A field called *EconomicCost*, with the calculation 
-
-> PROPDMG x PROPDMGEXP + CROPDMG x CROPDMGEXP
-
-will be created, to give a view of the total economic impact presented by each event type. Also, the top ten event types will be used to identify the most impacting weather events.
-
-The values in the fields PROPDMGEXP and CROPDMGEXP will be replaced following the logic
+The exponent values (used to multiply the values in PROPDMG and CROPDMG) in the fields PROPDMGEXP and CROPDMGEXP will be replaced following the logic
 
 > k or K &rarr; 1x10<sup>3</sup>  
 > m or M &rarr; 1x10<sup>6</sup>  
 > b or B &rarr; 1x10<sup>9</sup>  
-> h or H &rarr; 1x10<sup>5</sup>  
-> 0, +, - or empty &rarr; 1  
-> any number will remain the same  
+> h or H &rarr; 1x10<sup>2</sup>  
+> 0, +, ?, - or empty &rarr; 1  
+> any number will be as is
 
 as seen in the function *multiplier*
 
@@ -105,75 +182,90 @@ as seen in the function *multiplier*
 multiplier <- function(type) {
         mul <- tolower(as.character(type))
         switch(ifelse(mul == '', '1', mul),
-               'k' = 1e3,
-               'm' = 1e6,
                'b' = 1e9,
-               'h' = 1e5,
+               'm' = 1e6,
+               'k' = 1e3,
+               'h' = 1e2,
                '+' = 1,
                '-' = 1,
                '0' = 1,
+               '?' = 1,
                as.numeric(type))
 }
 ```
 
-The calculation below prepares the data for the final results section
+Once again, the initial preparation of the data removes double zero values (from PRODMG and CROPDMG)
 
-```{r cache=TRUE, comment=FALSE, message=FALSE, results=FALSE}
+```{r comment=FALSE, message=FALSE, results=FALSE}
 economic_impact_set <- dataset %>%
-                select(EVTYPE, PROPDMG, CROPDMG) %>%
-                mutate(EventType = EVTYPE,
-                       PropDmg = PROPDMG,
-                       CropDmg = CROPDMG) %>%
-                select(EventType, PropDmg, CropDmg)
+        select(EVTYPE, PROPDMG, CROPDMG, PROPDMGEXP, CROPDMGEXP) %>%
+        mutate(EventType = EVTYPE,
+               PropDmg = PROPDMG,
+               CropDmg = CROPDMG) %>%
+        filter(PropDmg != 0 | CropDmg != 0) %>%
+        select(EventType, PropDmg, CropDmg, PROPDMGEXP, CROPDMGEXP)
+```
 
-economic_impact_set$PropDmgMul <- dataset$PROPDMGEXP %>%
+The exponent fields are changed by the *multiplier* function and the final result is divided by 10<sup>9</sup>, for better reading in the display table
+
+```{r comment=FALSE, message=FALSE, results=FALSE}
+economic_impact_set$PropDmgMul <- economic_impact_set$PROPDMGEXP %>%
         sapply(multiplier)
-economic_impact_set$CropDmgMul <- dataset$CROPDMGEXP %>%
+economic_impact_set$CropDmgMul <- economic_impact_set$CROPDMGEXP %>%
         sapply(multiplier)
 economic_impact_set <- economic_impact_set %>%
-        mutate(EconomicCost = (PropDmg * PropDmgMul + CropDmg * CropDmgMul) / 1e9)
+        mutate(Property = PropDmg * PropDmgMul / 1e9,
+               Crop = CropDmg * CropDmgMul / 1e9) %>%
+        select(EventType, Property, Crop)
+```
 
-econ_agg <- aggregate(EconomicCost ~ EventType, data = economic_impact_set, FUN = sum)
-most_economic_impacting_events <- econ_agg %>%
-        arrange(desc(EconomicCost)) %>%
-        select(EventType, EconomicCost) %>%
-        mutate(EventType = tolower(EventType)) %>%
+The relevant fields, `Property` and `Crop`, are summed up, so the top ten most impacting event can be highlighted
+
+```{r comment=FALSE, message=FALSE, results=FALSE}
+econ_agg <- aggregate(cbind(Property, Crop) ~ EventType, data = economic_impact_set, sum)
+top_ten_econ_events <- econ_agg %>%
+        mutate(Total = Property + Crop) %>%
         top_n(10)
+most_economic_impacting_events <- top_ten_econ_events %>%
+        select(EventType, Property, Crop) %>%
+        melt(id = "EventType", variable.name = "Damage")
 ```
 
 ## Results
 
 ### Human Health Impact
 
-The top ten event types that impact human health are shown below. By far, tornadoes are the most impact severe weather event, with `r format(most_impacting_events[most_impacting_events$EventType == 'tornado', 'Casualties']/sum(most_impacting_events[, 'Casualties']) * 100, digits = 3, nsmall = 1)`% of the total number of casualties.
+The top ten event types that impact human health are shown below. By far, tornadoes are the most impacting severe weather event, with `r format(max(top_ten_health_impacting_events$Total)/sum(health_impacting_events[, c('Fatalities', 'Injuries')]) * 100, digits = 3, nsmall = 1)`% of the total number of casualties. Values are in thousands
 ```{r}
-g <- most_impacting_events %>% ggplot(aes(x = reorder(EventType, Casualties), Casualties))
-g + geom_bar(stat = "identity", aes(color = EventType, fill = EventType)) +
-        theme(legend.position = "none") +
+top_ten_health_impacting_events %>%
+        arrange(desc(Total))
+```
+
+```{r}
+g <- most_health_impacting_events %>% ggplot(aes(fill = Casualties, y = value, x = reorder(EventType, value)))
+caption <- "Fatalities and injuries caused by severe weather events. Values are in thousands"
+g + geom_bar(stat = "identity") +
         ggtitle("Number of Casualties per Event Type") +
-        ylab("Casualties (in thousands)") +
+        ylab(paste("Casualties (in thousands)", caption, sep = "\n\n")) +
         xlab("Event Type") +
-        scale_y_continuous(limits = c(0, 100)) +
-        coord_flip() +
-        geom_text(aes(y = Casualties + 1,
-                      label = format(Casualties, digits = 2, nsmall = 1, big.mark = ",", scientific = FALSE),
-                      hjust = "left"), colour = "darkgrey")
+        coord_flip()
 ```
 
 ### Economic Impact
 
-The highest economic impact is caused by floods, while the other 9 top severe weather events trailing behind with, at most, less than half of floods' cost. 
-```{r}
-g <- most_economic_impacting_events %>% ggplot(aes(x = reorder(EventType, EconomicCost), EconomicCost))
-g + geom_bar(stat = "identity", aes(color = EventType, fill = EventType)) +
-        theme(legend.position = "none") +
-        ggtitle("Economic Cost per Event Type") +
-        ylab("Cost (in US$ billions)") +
-        xlab("Event Type") +
-        scale_y_continuous(limits = c(0, 157)) +
-        coord_flip() +
-        geom_text(aes(y = EconomicCost + 1,
-                      label = format(EconomicCost, digits = 3, nsmal = 1, big.mark = ",", scientific = FALSE),
-                      hjust = "left"), colour = "darkgrey")
+The highest economic impact is caused by floods, while the other 9 top severe weather events are trailing behind with, at most, roughly half of the floods' cost. Values are in US$ Billions
 
+```{r}
+top_ten_econ_events %>%
+        arrange(desc(Total))
+```
+
+```{r}
+g <- most_economic_impacting_events %>% ggplot(aes(fill = Damage, x = reorder(EventType, value), value))
+caption <- "Economic impact of severe weather events. Values are in US$ Billions"
+g + geom_bar(stat = "identity") +
+        ggtitle("Economic Cost per Event Type") +
+        ylab(paste("Cost (in US$ billions)", caption, sep = "\n\n")) +
+        xlab("Event Type") +
+        coord_flip()
 ```
